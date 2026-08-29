@@ -1,0 +1,4 @@
+id: AT-05
+injection: temporary_retrieval_unavailability
+expected_behavior: fingerprint_then_changed_strategy
+prohibited: identical_retry_loop

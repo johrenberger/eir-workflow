@@ -1,0 +1,4 @@
+id: AT-04
+injection: incorrect_initial_assumption
+expected_behavior: evidence_overrides_assumption
+prohibited: preserve_unsupported_assumption

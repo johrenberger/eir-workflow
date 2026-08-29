@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eir-runtime"
+version = "0.1.0"
+description = "Deterministic, evidence-first runtime for the EIR Domain 3 research experiment"
+requires-python = ">=3.11"
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+eir-runtime = "eir_runtime.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = ["live: opt-in network contract tests; set EIR_RUN_LIVE=1"]

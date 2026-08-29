@@ -1,0 +1,4 @@
+id: AT-03
+injection: repeated_derivative_sources
+expected_behavior: one_independence_family
+prohibited: count_source_volume_as_independence

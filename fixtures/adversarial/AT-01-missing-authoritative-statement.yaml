@@ -1,0 +1,4 @@
+id: AT-01
+injection: missing_authoritative_statement
+expected_terminal_outcome: INSUFFICIENT_EVIDENCE
+prohibited: infer_from_adjacent_meeting

@@ -1,0 +1,7 @@
+variants:
+  - id: maintained-range
+    date: "2099-01-01"
+    text: "The Committee decided to maintain the target range for the federal funds rate at 1 to 1-1/4 percent."
+  - id: lowered-range
+    date: "2099-02-01"
+    text: "The Committee decided to lower the target range for the federal funds rate by 1/4 percentage point to 2 to 2-1/4 percent."
