@@ -16,6 +16,7 @@ class RunStore:
         self.conn.execute("CREATE TABLE IF NOT EXISTS action_log (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT, action_id TEXT, status TEXT, payload TEXT)")
         self.conn.execute("CREATE TABLE IF NOT EXISTS sources (run_id TEXT, identity TEXT, hash TEXT, payload TEXT, PRIMARY KEY(run_id, identity))")
         self.conn.execute("CREATE TABLE IF NOT EXISTS artifacts (hash TEXT PRIMARY KEY, content TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+        self.conn.execute("CREATE TABLE IF NOT EXISTS objective_records (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, record_type TEXT NOT NULL, payload TEXT NOT NULL, content_hash TEXT)")
         self.conn.commit()
     def close(self) -> None:
         self.conn.close()
@@ -46,3 +47,9 @@ class RunStore:
         self.conn.execute("INSERT OR IGNORE INTO artifacts(hash,content) VALUES (?,?)", (digest, content)); self.conn.commit()
     def has_artifact(self, digest: str) -> bool:
         return bool(self.conn.execute("SELECT 1 FROM artifacts WHERE hash=?", (digest,)).fetchone())
+    def objective_record(self, run_id: str, record_type: str, payload: dict, content_hash: str | None = None) -> None:
+        """Persist adapter-owned, opaque state without extending frozen EIR fields."""
+        self.conn.execute("INSERT INTO objective_records(run_id,record_type,payload,content_hash) VALUES (?,?,?,?)", (run_id, record_type, json.dumps(payload), content_hash)); self.conn.commit()
+    def objective_records(self, run_id: str) -> list[dict]:
+        rows = self.conn.execute("SELECT record_type,payload,content_hash FROM objective_records WHERE run_id=? ORDER BY id", (run_id,)).fetchall()
+        return [{"record_type": row["record_type"], "payload": json.loads(row["payload"]), "content_hash": row["content_hash"]} for row in rows]

@@ -1,6 +1,6 @@
 """Independent deterministic terminal checker; intentionally does not call controller methods."""
 from __future__ import annotations
-from .engine import TerminalOutcome
+from .core import TerminalOutcome
 
 def verify(state: dict, *, exhausted: bool, invariant_ok: bool = True) -> tuple[TerminalOutcome, str]:
     claims = state["required_claims"]

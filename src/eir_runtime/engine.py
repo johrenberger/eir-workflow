@@ -1,29 +1,21 @@
 from __future__ import annotations
 import hashlib, json
-from enum import StrEnum
 import re
 from .adapters import RetrievedSource, RetrievalAdapter, ExtractionAdapter, InterpretationAdapter
 from .store import RunStore
-from .validation import validate_eir
+from .core import ActionKey, RunLifecycle, RunController, TerminalOutcome
+from .research_adapter import ResearchObjectiveAdapter
 from .evidence import evaluate, independence, progress, changed
-from .control import invariant_errors, next_level
-
-class TerminalOutcome(StrEnum): SUPPORTED="SUPPORTED"; INSUFFICIENT_EVIDENCE="INSUFFICIENT_EVIDENCE"; FAILED="FAILED"
+from .control import next_level
 
 class ResearchController:
     def __init__(self, store: RunStore, eir: dict, retrieval: RetrievalAdapter | None = None, extractor: ExtractionAdapter | None = None, interpreter: InterpretationAdapter | None = None):
         self.store, self.eir, self.retrieval, self.extractor, self.interpreter = store, eir, retrieval, extractor, interpreter
+        self.lifecycle = RunLifecycle(store)
+        self.adapter = ResearchObjectiveAdapter()
+        self.run_controller = RunController(store, self.adapter)
     def start(self, run_id: str) -> None:
-        try:
-            existing = self.store.load(run_id)
-            if existing["terminal"]: raise ValueError(f"run already terminal: {existing['terminal']}")
-            return
-        except KeyError:
-            pass
-        issues = validate_eir(self.eir); self.store.create(run_id)
-        if issues:
-            self.store.action(run_id, "VALIDATE", "INVALID", {"diagnostics": [x.__dict__ for x in issues]}); self.store.terminal(run_id, TerminalOutcome.FAILED, "INVALID_EIR"); raise ValueError(issues)
-        self.store.action(run_id, "VALIDATE", "OK", {})
+        self.run_controller.start(run_id, self.eir)
     def dispatch(self, run_id: str, action_class: str, *, ambiguity: bool=False) -> None:
         """Explicit action gate: D1 never invokes a model; N1 is bounded."""
         if action_class not in {"D1", "D2", "N1", "H1"}: raise ValueError("unknown action")
@@ -87,12 +79,16 @@ class ResearchController:
         self.store.action(run_id, "A04", "OK", {"claim": claim_id})
     def record_failure(self, run_id: str, action: str, route: str, signature: str, strategy: str="L1", claim_id: str | None=None) -> None:
         fp = {"action_id": action, "claim_id": claim_id, "source_identity_or_route": route, "normalized_error_or_conflict_signature": signature, "strategy_id": strategy}
-        with self.store.checkpoint(run_id, "RESEARCHING") as s:
-            s["failure_fingerprints"].append(fp)
-        self.store.action(run_id, action, "INVALID", fp)
+        self.lifecycle.record_failure(
+            run_id,
+            ActionKey(action, claim_id or route, strategy, route),
+            signature=signature,
+            phase="RESEARCHING",
+            payload=fp,
+        )
     def can_retry(self, run_id: str, signature: str, strategy: str, changed: bool=False) -> bool:
-        s = self.store.load(run_id)["state"]; n=sum(f["normalized_error_or_conflict_signature"] == signature and f["strategy_id"] == strategy for f in s["failure_fingerprints"])
-        return changed if strategy == "L3" else n < 2
+        s = self.store.load(run_id)["state"]
+        return self.lifecycle.can_retry(s["failure_fingerprints"], signature=signature, strategy=strategy, material_change=changed)
     def control_route(self, run_id: str, claim_id: str, signature: str, strategy: str, *, material_change: bool=False) -> str:
         """Apply the EIR's bounded retry policy without performing the next side effect."""
         if strategy not in {"L1", "L2", "L3", "L4"}: raise ValueError("unsupported control strategy")
@@ -182,33 +178,15 @@ class ResearchController:
         return record
     def recover(self, run_id: str) -> str | None:
         """Select, rather than duplicate, the smallest durable incomplete action."""
-        state = self.store.load(run_id)["state"]
-        pending = self.store.conn.execute("SELECT action_id,payload FROM action_log WHERE run_id=? AND status='INFLIGHT' ORDER BY id", (run_id,)).fetchall()
-        if pending:
-            for row in pending: self.store.action(run_id, row["action_id"], "RECONCILED", json.loads(row["payload"]))
-        for claim in state["required_claims"]:
-            if claim["status"] not in {"supported", "contradicted"}: return claim["id"]
-        return None
+        return self.run_controller.recover(run_id)
     def independently_verify(self, run_id: str, claim_id: str, source: RetrievedSource) -> None:
         with self.store.checkpoint(run_id, "RESEARCHING") as s:
             links=s["claim_evidence_map"].get(claim_id, []); ok=bool(links and any(x["source"] != source.canonical_id for x in links))
             s["independent_verification_records"].append({"claim": claim_id, "source": source.canonical_id, "verified": ok})
     def complete(self, run_id: str, exhausted: bool=False) -> TerminalOutcome:
-        s=self.store.load(run_id)["state"]; self._derive(s)
-        from .verifier import verify
-        out,reason = verify(s, exhausted=exhausted, invariant_ok=not invariant_errors(s))
-        self.store.terminal(run_id,out,reason); return out
+        return self.run_controller.complete(run_id, exhausted=exhausted)
     def status(self, run_id: str) -> dict:
         r=self.store.load(run_id); s=r["state"]; return {"run_id":run_id,"phase":r["phase"],"terminal_outcome":r["terminal"],"reason_code":r["reason"],"required_claims":len(s["required_claims"]),"supported_claims":s["supported_claims"],"unsupported_claims":s["unsupported_claims"],"contradicted_claims":s["contradicted_claims"],"progress":s["progress_metrics"],"failure_fingerprints":s["failure_fingerprints"],"verification_complete":len({x['claim'] for x in s['independent_verification_records'] if x['verified']})==len(s["required_claims"])}
     @staticmethod
     def _derive(s: dict) -> None:
-        supported=[]; contradicted=[]; unsupported=[]
-        for c in s["required_claims"]:
-            links=s["claim_evidence_map"].get(c["id"],[]); signs={x["polarity"] for x in links}
-            adjudication=s.get("adjudications", {}).get(c["id"])
-            c["status"]=("supported" if adjudication and adjudication["resolution"] == "support" else "contradicted" if adjudication else "contradicted" if len(signs)>1 else "supported" if "support" in signs and any(x["authority"] for x in links) else "unsupported" if links else "unresolved")
-            if c["status"]=="supported": supported.append(c["id"])
-            elif c["status"]=="contradicted": contradicted.append(c["id"])
-            else: unsupported.append(c["id"])
-        s["supported_claims"],s["contradicted_claims"],s["unsupported_claims"]=supported,contradicted,unsupported
-        s["progress_metrics"] = progress(s)
+        ResearchObjectiveAdapter().derive(s)
