@@ -91,24 +91,19 @@ class ResearchController:
         return self.lifecycle.can_retry(s["failure_fingerprints"], signature=signature, strategy=strategy, material_change=changed)
     def control_route(self, run_id: str, claim_id: str, signature: str, strategy: str, *, material_change: bool=False) -> str:
         """Apply the EIR's bounded retry policy without performing the next side effect."""
-        if strategy not in {"L1", "L2", "L3", "L4"}: raise ValueError("unsupported control strategy")
         state = self.store.load(run_id)["state"]
         limits = self.eir["environment"]["execution_limits"]
-        fingerprints = [x for x in state["failure_fingerprints"] if x.get("claim_id") == claim_id]
-        total = len(fingerprints)
-        same = [x for x in fingerprints if x["strategy_id"] == strategy and x["normalized_error_or_conflict_signature"] == signature]
-        per_strategy = int(limits["max_attempts_per_claim_and_strategy"])
-        total_limit = int(limits["max_total_retrieval_attempts_per_claim"])
-        l4_limit = int(limits.get("max_adjudication_attempts_per_material_contradiction", 2))
         unresolved_n1 = any(x["claim_id"] == claim_id and x["unresolved"] for x in state.get("n1_records", []))
-        if total >= total_limit: route = "H1" if unresolved_n1 else "TERMINAL_ASSESSMENT"
-        elif strategy in {"L1", "L2"} and len(same) < per_strategy: route = f"RETRY_{strategy}"
-        elif strategy in {"L1", "L2"}: route = "L3"
-        elif strategy == "L3" and not material_change: raise ValueError("L3 requires a material source/path/context change")
-        elif strategy == "L3" and len(same) < per_strategy: route = "RETRY_L3"
-        elif strategy == "L3": route = "L4"
-        elif len(same) < l4_limit: route = "RETRY_L4"
-        else: route = "H1" if unresolved_n1 else "TERMINAL_ASSESSMENT"
+        route = self.run_controller.control_route(
+            run_id, ActionKey("CONTROL", claim_id, strategy, signature), signature=signature,
+            max_attempts_per_strategy=int(limits["max_attempts_per_claim_and_strategy"]),
+            max_total_attempts=int(limits["max_total_retrieval_attempts_per_claim"]),
+            max_l4_attempts=int(limits.get("max_adjudication_attempts_per_material_contradiction", 2)),
+            material_change=material_change, requires_human=unresolved_n1,
+        )
+        fingerprints = [x for x in state["failure_fingerprints"] if x.get("claim_id") == claim_id]
+        same = [x for x in fingerprints if x["strategy_id"] == strategy and x["normalized_error_or_conflict_signature"] == signature]
+        total = len(fingerprints)
         with self.store.checkpoint(run_id, "RESEARCHING") as updated:
             updated["strategy_history"].append({"claim_id": claim_id, "from": strategy, "signature": signature, "decision": route, "material_change": material_change, "attempt_count": len(same), "total_attempt_count": total})
         return route

@@ -1,0 +1,16 @@
+{
+  "validation": {
+    "watchdog": {"returncode": 0, "timed_out": false},
+    "stdout": "16 passed in 1.19s",
+    "production_unchanged": true
+  },
+  "coverage": {
+    "meta": {"version": "7.16.0"},
+    "totals": {"percent_covered": 95.21},
+    "files": {
+      "F:\\coding\\pytest-fastapi-crud-example\\app\\other.py": {
+        "summary": {"percent_covered": 100.0}
+      }
+    }
+  }
+}

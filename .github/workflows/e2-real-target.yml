@@ -1,0 +1,39 @@
+name: E2 real-target contract
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repo_path:
+        description: Absolute path to the prepared pytest-fastapi-crud-example checkout on the self-hosted Windows runner.
+        required: true
+        type: string
+      target_python:
+        description: Absolute path to the target's prepared Python executable with pytest and coverage installed.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2-real-target
+  cancel-in-progress: false
+
+jobs:
+  e2-real-target:
+    # Configure the protected "e2-real-target" environment with required reviewers.
+    environment: e2-real-target
+    runs-on: [self-hosted, windows, eir-e2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install EIR runtime test dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Run opt-in real-target E2 contract
+        shell: pwsh
+        env:
+          EIR_E2_TARGET: ${{ inputs.target_repo_path }}
+          EIR_E2_PYTHON: ${{ inputs.target_python }}
+        run: python -m pytest tests/test_e2_real_target_contract.py -q
