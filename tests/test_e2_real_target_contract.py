@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import hashlib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -27,12 +28,16 @@ def test_e2_real_target_replays_through_shared_controller(tmp_path):
     manifest = json.loads((ROOT / "fixtures" / "test-automation-e2.json").read_text())
     env = os.environ.copy(); env["PYTHONPATH"] = str(TARGET); env["PYTHONUNBUFFERED"] = "1"
     data = tmp_path / ".coverage.e2"
+    junit = tmp_path / "pytest.junit.xml"
     production = TARGET / "app" / "user.py"
     production_hash_before = hashlib.sha256(production.read_bytes()).hexdigest()
-    run = subprocess.run([PYTHON, "-m", "coverage", "run", f"--data-file={data}", "--source=app", "--branch", "-m", "pytest", str(TARGET / "tests"), "-q", "--rootdir", str(tmp_path)], cwd=tmp_path, env=env, text=True, capture_output=True, timeout=60)
+    run = subprocess.run([PYTHON, "-m", "coverage", "run", f"--data-file={data}", "--source=app", "--branch", "-m", "pytest", str(TARGET / "tests"), "-q", "--rootdir", str(tmp_path), f"--junitxml={junit}"], cwd=tmp_path, env=env, text=True, capture_output=True, timeout=60)
     report = tmp_path / "coverage.json"
     generated = subprocess.run([PYTHON, "-m", "coverage", "json", f"--data-file={data}", "-o", str(report)], cwd=tmp_path, text=True, capture_output=True, timeout=60)
-    validation = {"watchdog": {"returncode": run.returncode, "timed_out": False}, "stdout": run.stdout, "production_unchanged": production_hash_before == hashlib.sha256(production.read_bytes()).hexdigest()}
+    root = ET.parse(junit).getroot()
+    suite = next((node for node in root.iter("testsuite") if "tests" in node.attrib), root)
+    collected = int(suite.attrib["tests"]); failures = int(suite.attrib.get("failures", 0)); errors = int(suite.attrib.get("errors", 0)); skipped = int(suite.attrib.get("skipped", 0))
+    validation = {"watchdog": {"returncode": run.returncode, "timed_out": False}, "test_execution": {"collected": collected, "passed": collected - failures - errors - skipped, "failed": failures, "errors": errors, "skipped": skipped, "exit_code": run.returncode, "timed_out": False, "duration_seconds": float(suite.attrib.get("time", 0.0)), "collection_errors": 0}, "production_unchanged": production_hash_before == hashlib.sha256(production.read_bytes()).hexdigest()}
     coverage = json.loads(report.read_text())
     status = set(subprocess.run(["git", "-c", "safe.directory=F:/coding/pytest-fastapi-crud-example", "-C", str(TARGET), "status", "--porcelain"], text=True, capture_output=True, check=True).stdout.splitlines())
     changed_paths = [entry[3:] for entry in sorted(status - BASELINE_STATUS)]

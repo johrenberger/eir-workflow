@@ -55,6 +55,14 @@ class RunLifecycle:
             return material_change and len(same) < max_attempts
         return len(same) < max_attempts
 
+    @staticmethod
+    def next_strategy(fingerprints: list[dict[str, Any]], *, signature: str, strategy: str, material_change: bool = False, max_attempts: int = 2) -> str:
+        """Select a bounded opaque strategy without inspecting a domain unit."""
+        if strategy == "L3" and not material_change:
+            raise ValueError("L3 requires a material source/path/context change")
+        same = [item for item in fingerprints if item.get("normalized_error_or_conflict_signature") == signature and item.get("strategy_id") == strategy]
+        return strategy if len(same) < max_attempts else "L3"
+
     def reconcile_inflight(self, run_id: str) -> list[dict[str, Any]]:
         pending = self.store.conn.execute(
             "SELECT action_id,payload FROM action_log WHERE run_id=? AND status='INFLIGHT' ORDER BY id",
@@ -127,7 +135,7 @@ class RunController:
         record = {"action": key.action_id, "unit_id": key.unit_id, "operator": operator, "rationale": rationale, "next_strategy": next_strategy, "injects_fact": False}
         self.store.objective_record(run_id, "human_resolution", record)
         self.store.action(run_id, "H1", "RESOLVED", record)
-        with self.store.checkpoint(run_id, "RESEARCHING"):
+        with self.store.checkpoint(run_id, "EXECUTING"):
             pass
         return record
 
@@ -170,5 +178,5 @@ class RunController:
                 pass
             phase = "PLANNED"
         if phase == "PLANNED":
-            with self.store.checkpoint(run_id, "RESEARCHING"):
+            with self.store.checkpoint(run_id, "EXECUTING"):
                 pass

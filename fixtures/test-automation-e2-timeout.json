@@ -1,7 +1,7 @@
 {
   "validation": {
     "watchdog": {"returncode": null, "timed_out": true},
-    "stdout": "................ 16 passed in 1.19s",
+    "test_execution": {"collected": 16, "passed": 16, "failed": 0, "errors": 0, "skipped": 0, "exit_code": null, "timed_out": true, "duration_seconds": 60.0},
     "production_unchanged": true
   },
   "coverage": {

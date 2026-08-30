@@ -18,4 +18,7 @@ eir-runtime = "eir_runtime.cli:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-markers = ["live: opt-in network contract tests; set EIR_RUN_LIVE=1"]
+markers = [
+  "live: opt-in network contract tests; set EIR_RUN_LIVE=1",
+  "mutation_integration: opt-in mutmut tool contract; set EIR_RUN_MUTMUT=1",
+]

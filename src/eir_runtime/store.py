@@ -5,7 +5,10 @@ from pathlib import Path
 from typing import Iterator
 
 FIELDS = ("meeting_universe", "route_manifest", "required_claims", "supported_claims", "unsupported_claims", "contradicted_claims", "claim_evidence_map", "source_registry", "retrieval_history", "failure_fingerprints", "strategy_history", "independent_verification_records", "schema_pressure_log", "progress_metrics", "extraction_records", "inflight_actions", "uncertainties", "n1_records", "adjudications", "human_handoffs", "human_resolutions")
-LEGAL_PHASES = {"NEW": {"PLANNED", "RESEARCHING", "TERMINAL"}, "PLANNED": {"PLANNED", "RESEARCHING", "TERMINAL"}, "RESEARCHING": {"RESEARCHING", "HANDOFF", "TERMINAL"}, "HANDOFF": {"RESEARCHING", "TERMINAL"}, "TERMINAL": set()}
+# ``RESEARCHING`` was the v1 implementation name.  Persisted generic work is
+# now explicitly domain-neutral.  Existing databases are read compatibly by
+# normalizing the legacy value at load time.
+LEGAL_PHASES = {"NEW": {"PLANNED", "EXECUTING", "TERMINAL"}, "PLANNED": {"PLANNED", "EXECUTING", "TERMINAL"}, "EXECUTING": {"EXECUTING", "HANDOFF", "TERMINAL"}, "HANDOFF": {"EXECUTING", "TERMINAL"}, "TERMINAL": set()}
 
 class RunStore:
     def __init__(self, db: str | Path):
@@ -26,7 +29,10 @@ class RunStore:
     def load(self, run_id: str) -> dict:
         row = self.conn.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
         if not row: raise KeyError(run_id)
-        return {**dict(row), "state": json.loads(row["state"])}
+        loaded = dict(row)
+        if loaded["phase"] == "RESEARCHING":
+            loaded["phase"] = "EXECUTING"
+        return {**loaded, "state": json.loads(row["state"])}
     @contextmanager
     def checkpoint(self, run_id: str, phase: str) -> Iterator[dict]:
         row = self.load(run_id); state = row["state"]

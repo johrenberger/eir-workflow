@@ -19,7 +19,7 @@ def test_h1_requires_bounded_unresolved_n1(tmp_path):
 def test_human_resolution_reopens_without_injecting_fact(tmp_path):
     c,s=setup(tmp_path); handoff=c.escalate_h1("r","2025-01-01:resulting_range",exhausted=True)
     result=c.resolve_h1("r","2025-01-01:resulting_range",operator="reviewer-1",rationale="Use an alternate official archive",next_strategy="L4 alternate archive")
-    state=s.load("r")["state"]; assert s.load("r")["phase"] == "RESEARCHING" and result["injects_fact"] is False
+    state=s.load("r")["state"]; assert s.load("r")["phase"] == "EXECUTING" and result["injects_fact"] is False
     assert state["human_handoffs"] == [handoff] and state["human_resolutions"][0]["operator"] == "reviewer-1"
 def test_human_resolution_requires_existing_handoff(tmp_path):
     c,s=setup(tmp_path)

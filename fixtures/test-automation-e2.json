@@ -2,6 +2,7 @@
   "objective_id": "e2-pytest-fastapi-crud-user-coverage",
   "target_module": "app/user.py",
   "minimum_line_coverage": 90.0,
+  "minimum_branch_coverage": 80.0,
   "allowed_change_paths": ["tests/test_crud_api.py", "tests/test_user_exceptions.py"],
   "production_paths": ["app/user.py"],
   "execution_boundary": "external-root"

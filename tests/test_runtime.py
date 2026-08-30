@@ -59,7 +59,7 @@ def test_independent_verifier_blocks_unverified_supported_claims(tmp_path):
 def test_checkpoint_rolls_back_on_failure(tmp_path):
     c,s=controller(tmp_path)
     with pytest.raises(RuntimeError):
-        with s.checkpoint("r","RESEARCHING") as state:
+        with s.checkpoint("r","EXECUTING") as state:
             state["required_claims"].append({"id":"bad"}); raise RuntimeError("interrupt")
     assert not s.load("r")["state"]["required_claims"]
 def test_status_survives_store_restart(tmp_path):

@@ -11,7 +11,7 @@ TIMEOUT_FIXTURE = Path(__file__).parents[1] / "fixtures" / "test-automation-e2-t
 
 
 def measurement(coverage, **overrides):
-    value = {"target_line_coverage": coverage, "minimum_line_coverage": 90.0, "full_suite_passed": True, "process_exit_code": 0, "watchdog_inactive": True, "production_unchanged": True, "valid_coverage": True}
+    value = {"objective_manifest": {"minimum_line_coverage": 90.0, "minimum_branch_coverage": 80.0}, "target_line_coverage": coverage, "target_branch_coverage": 80.0, "minimum_line_coverage": 90.0, "full_suite_passed": True, "process_exit_code": 0, "watchdog_inactive": True, "production_unchanged": True, "valid_coverage": True, "unresolved_behavior_gaps": 0}
     value.update(overrides)
     return value
 
@@ -58,11 +58,18 @@ def test_e2_negative_fixture_missing_target_coverage_cannot_advance_progress(tmp
 
 def test_e2_evidence_ingestion_derives_valid_completion_measurement():
     manifest = json.loads(FIXTURE.read_text())
-    validation = {"watchdog": {"returncode": 0, "timed_out": False}, "stdout": "16 passed in 1.19s", "production_unchanged": True}
-    coverage = {"meta": {"version": "7.16.0"}, "totals": {"percent_covered": 95.21}, "files": {r"F:\coding\pytest-fastapi-crud-example\app\user.py": {"summary": {"percent_covered": 90.48}}}}
+    validation = {"watchdog": {"returncode": 0, "timed_out": False}, "test_execution": {"collected": 16, "passed": 16, "failed": 0, "errors": 0, "skipped": 0, "exit_code": 0, "timed_out": False, "duration_seconds": 1.19}, "production_unchanged": True}
+    coverage = {"meta": {"version": "7.16.0"}, "totals": {"percent_covered": 95.21, "percent_branches_covered": 83.33}, "files": {r"F:\coding\pytest-fastapi-crud-example\app\user.py": {"summary": {"percent_covered": 90.48, "percent_branches_covered": 83.33}, "missing_lines": [24], "missing_branches": [[122, 123]]}}}
     derived = TestAutomationObjectiveAdapter().measurement_from_evidence(manifest, validation, coverage)
     assert derived["valid_coverage"] and derived["full_suite_passed"] and derived["target_line_coverage"] == 90.48
     assert set(derived["evidence_artifact_hashes"]) == {"validation", "coverage"}
+
+
+def test_branch_only_improvement_counts_as_progress():
+    adapter = TestAutomationObjectiveAdapter()
+    before = measurement(90.0, target_branch_coverage=70.0)
+    after = measurement(90.0, target_branch_coverage=80.0)
+    assert adapter.compare(before, after)["reason"] == "branch_coverage"
 
 
 def test_test_adapter_enforces_manifest_test_only_allowlist():
@@ -83,7 +90,7 @@ def test_timeout_fixture_is_invalid_progress_and_routes_to_generic_h1(tmp_path):
     measurement = controller.adapter.measurement_from_evidence(manifest, raw["validation"], raw["coverage"])
     assert controller.record_measurement("e2", key, measurement) == {"improved": False, "reason": "invalid_measurement"}
     for _ in range(2):
-        controller.lifecycle.record_failure("e2", key, signature="POSTPASS_TIMEOUT", phase="RESEARCHING")
+        controller.lifecycle.record_failure("e2", key, signature="POSTPASS_TIMEOUT", phase="EXECUTING")
     assert controller.control_route("e2", key, signature="POSTPASS_TIMEOUT", max_attempts_per_strategy=2, max_total_attempts=8, max_l4_attempts=2, requires_human=True) == "H1"
     assert controller.handoff("e2", key, reason="watchdog remained active after pass output", evidence=measurement)["strategy_id"] == "L5"
     store.close()

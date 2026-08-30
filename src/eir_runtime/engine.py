@@ -6,7 +6,6 @@ from .store import RunStore
 from .core import ActionKey, RunLifecycle, RunController, TerminalOutcome
 from .research_adapter import ResearchObjectiveAdapter
 from .evidence import evaluate, independence, progress, changed
-from .control import next_level
 
 class ResearchController:
     def __init__(self, store: RunStore, eir: dict, retrieval: RetrievalAdapter | None = None, extractor: ExtractionAdapter | None = None, interpreter: InterpretationAdapter | None = None):
@@ -39,7 +38,7 @@ class ResearchController:
         row = self.store.conn.execute("SELECT identity FROM sources WHERE run_id=? AND (identity=? OR hash=?)", (run_id, identity, digest)).fetchone()
         self.store.artifact(digest, source.content)
         self.store.conn.execute("INSERT OR IGNORE INTO sources VALUES (?,?,?,?)", (run_id, identity, digest, json.dumps(source.__dict__))); self.store.conn.commit()
-        with self.store.checkpoint(run_id, "RESEARCHING") as s:
+        with self.store.checkpoint(run_id, "EXECUTING") as s:
             s["source_registry"][identity] = {"content_hash": digest, "publisher": source.publisher, "source_class": source.source_class, "provenance_family": source.provenance_family}
             s["retrieval_history"].append({"identity": identity, "deduplicated": bool(row), "available": source.available, "content_hash": digest})
         return row["identity"] if row else identity
@@ -50,11 +49,11 @@ class ResearchController:
             source = self.retrieval.retrieve(route)
         except Exception as exc:
             self.record_failure(run_id, "A03", route, type(exc).__name__)
-            with self.store.checkpoint(run_id, "RESEARCHING") as s: s["uncertainties"].append({"class": "temporary_retrieval_unavailability", "route": route})
+            with self.store.checkpoint(run_id, "EXECUTING") as s: s["uncertainties"].append({"class": "temporary_retrieval_unavailability", "route": route})
             return None
         if not source.available:
             self.record_failure(run_id, "A03", route, "SOURCE_UNAVAILABLE")
-            with self.store.checkpoint(run_id, "RESEARCHING") as s: s["uncertainties"].append({"class": "temporary_retrieval_unavailability", "route": route})
+            with self.store.checkpoint(run_id, "EXECUTING") as s: s["uncertainties"].append({"class": "temporary_retrieval_unavailability", "route": route})
             return None
         self.ingest(run_id, source); self.store.action(run_id, f"RETRIEVE:{route}", "OK", {"identity": source.canonical_id}); return source
     def extract_and_link(self, run_id: str, source: RetrievedSource, polarity: str="support") -> None:
@@ -69,7 +68,7 @@ class ResearchController:
         if not required <= set(payload) or normalized_span not in normalized_source: self.record_failure(run_id, "A04", "extract", "INVALID_EXTRACTION"); return
         claim_id = f"{payload['meeting_date']}:{payload['field']}"
         source_id = self.ingest(run_id, source)
-        with self.store.checkpoint(run_id, "RESEARCHING") as s:
+        with self.store.checkpoint(run_id, "EXECUTING") as s:
             if claim_id not in {c['id'] for c in s['required_claims']}: raise ValueError("out-of-universe extraction")
             link = {"source": source_id, "value": payload["value"], "polarity": polarity, "span": payload["statement_span"], "authority": source.source_class.startswith("official"), "family": source.provenance_family}
             link["quality"] = evaluate(link)
@@ -83,7 +82,7 @@ class ResearchController:
             run_id,
             ActionKey(action, claim_id or route, strategy, route),
             signature=signature,
-            phase="RESEARCHING",
+            phase="EXECUTING",
             payload=fp,
         )
     def can_retry(self, run_id: str, signature: str, strategy: str, changed: bool=False) -> bool:
@@ -104,18 +103,18 @@ class ResearchController:
         fingerprints = [x for x in state["failure_fingerprints"] if x.get("claim_id") == claim_id]
         same = [x for x in fingerprints if x["strategy_id"] == strategy and x["normalized_error_or_conflict_signature"] == signature]
         total = len(fingerprints)
-        with self.store.checkpoint(run_id, "RESEARCHING") as updated:
+        with self.store.checkpoint(run_id, "EXECUTING") as updated:
             updated["strategy_history"].append({"claim_id": claim_id, "from": strategy, "signature": signature, "decision": route, "material_change": material_change, "attempt_count": len(same), "total_attempt_count": total})
         return route
     def replan(self, run_id: str, signature: str, strategy: str, *, material_change: bool=False) -> str:
         state = self.store.load(run_id)["state"]
-        level = next_level(state["failure_fingerprints"], signature, strategy, material_change=material_change)
-        with self.store.checkpoint(run_id, "RESEARCHING") as s:
+        level = self.lifecycle.next_strategy(state["failure_fingerprints"], signature=signature, strategy=strategy, material_change=material_change)
+        with self.store.checkpoint(run_id, "EXECUTING") as s:
             s["strategy_history"].append({"from": strategy, "to": level, "signature": signature, "material_change": material_change})
         return level
     def record_schema_pressure(self, run_id: str, concept: str, gap: str) -> None:
         if concept not in {"claim", "source", "citation", "hypothesis"}: raise ValueError("unknown schema pressure concept")
-        with self.store.checkpoint(run_id, "RESEARCHING") as s:
+        with self.store.checkpoint(run_id, "EXECUTING") as s:
             s["schema_pressure_log"].append({"candidate_concept": concept, "observed_gap": gap, "disposition": "record_for_post_test_review"})
     def n1_context(self, run_id: str, claim_id: str) -> dict:
         links = self.store.load(run_id)["state"]["claim_evidence_map"].get(claim_id, [])
@@ -130,7 +129,7 @@ class ResearchController:
             self.record_failure(run_id, "A07", claim_id, "INVALID_N1_OUTPUT")
             raise ValueError("invalid bounded N1 output")
         record = {"claim_id": claim_id, "context_evidence_count": len(context["evidence"]), "resolution": result["resolution"], "rationale": result["rationale"], "unresolved": True}
-        with self.store.checkpoint(run_id, "RESEARCHING") as state:
+        with self.store.checkpoint(run_id, "EXECUTING") as state:
             state["n1_records"].append(record)
             state["uncertainties"].append({"class": "conflicting_claim_evidence", "claim_id": claim_id})
         self.store.action(run_id, "A07", "UNRESOLVED", record)
@@ -143,7 +142,7 @@ class ResearchController:
         if not source.source_class.startswith("official") or source.provenance_family in existing_families:
             raise ValueError("L4 requires a distinct authoritative provenance family")
         self.link_extraction(run_id, source, payload, resolution)
-        with self.store.checkpoint(run_id, "RESEARCHING") as state:
+        with self.store.checkpoint(run_id, "EXECUTING") as state:
             state["adjudications"][claim_id] = {"resolution": resolution, "source": source.canonical_id, "family": source.provenance_family, "method": "L4_distinct_authoritative_route"}
             self._derive(state)
         self.store.action(run_id, "A08", "ADJUDICATED", state["adjudications"][claim_id])
@@ -168,14 +167,14 @@ class ResearchController:
         if self.store.load(run_id)["phase"] != "HANDOFF": raise ValueError("run is not awaiting human handoff")
         if not any(x["claim_id"] == claim_id for x in state.get("human_handoffs", [])): raise ValueError("no matching handoff")
         record = {"claim_id": claim_id, "operator": operator, "rationale": rationale, "next_strategy": next_strategy, "injects_fact": False}
-        with self.store.checkpoint(run_id, "RESEARCHING") as updated: updated["human_resolutions"].append(record)
+        with self.store.checkpoint(run_id, "EXECUTING") as updated: updated["human_resolutions"].append(record)
         self.store.action(run_id, "H1", "RESOLVED", record)
         return record
     def recover(self, run_id: str) -> str | None:
         """Select, rather than duplicate, the smallest durable incomplete action."""
         return self.run_controller.recover(run_id)
     def independently_verify(self, run_id: str, claim_id: str, source: RetrievedSource) -> None:
-        with self.store.checkpoint(run_id, "RESEARCHING") as s:
+        with self.store.checkpoint(run_id, "EXECUTING") as s:
             links=s["claim_evidence_map"].get(claim_id, []); ok=bool(links and any(x["source"] != source.canonical_id for x in links))
             s["independent_verification_records"].append({"claim": claim_id, "source": source.canonical_id, "verified": ok})
     def complete(self, run_id: str, exhausted: bool=False) -> TerminalOutcome:

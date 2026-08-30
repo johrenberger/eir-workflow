@@ -8,12 +8,13 @@ def test_lifecycle_persists_opaque_fingerprint_and_respects_retry_budget(tmp_pat
     lifecycle = RunLifecycle(store)
     key = ActionKey("A01", "opaque-unit", "L1", "input-hash")
     lifecycle.record_failure("r", key, signature="FAILED", phase="PLANNED")
-    lifecycle.record_failure("r", key, signature="FAILED", phase="RESEARCHING")
+    lifecycle.record_failure("r", key, signature="FAILED", phase="EXECUTING")
     fingerprints = store.load("r")["state"]["failure_fingerprints"]
     assert fingerprints[0]["unit_id"] == "opaque-unit"
     assert not lifecycle.can_retry(fingerprints, signature="FAILED", strategy="L1")
     assert not lifecycle.can_retry(fingerprints, signature="FAILED", strategy="L3")
     assert lifecycle.can_retry(fingerprints, signature="FAILED", strategy="L3", material_change=True)
+    assert lifecycle.next_strategy(fingerprints, signature="FAILED", strategy="L1") == "L3"
     store.close()
 
 
@@ -79,5 +80,5 @@ def test_generic_h1_handoff_is_idempotent_and_requires_human_resolution(tmp_path
     assert controller.handoff("r", key, reason="ignored", evidence={}) == handoff
     assert store.load("r")["phase"] == "HANDOFF"
     resolution = controller.resolve_handoff("r", key, operator="operator", rationale="new access", next_strategy="L3")
-    assert resolution["injects_fact"] is False and store.load("r")["phase"] == "RESEARCHING"
+    assert resolution["injects_fact"] is False and store.load("r")["phase"] == "EXECUTING"
     store.close()

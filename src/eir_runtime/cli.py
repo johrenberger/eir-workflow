@@ -46,7 +46,7 @@ def main():
             key=ActionKey("TEST_EVIDENCE",manifest["target_module"],"L1",measurement["evidence_artifact_hashes"]["coverage"])
             decision=controller.record_measurement(args.run_id,key,measurement)
             if not change_set["valid"]:
-                controller.lifecycle.record_failure(args.run_id,key,signature="DISALLOWED_CHANGE_SET",phase="RESEARCHING",payload={"change_set":change_set})
+                controller.lifecycle.record_failure(args.run_id,key,signature="DISALLOWED_CHANGE_SET",phase="EXECUTING",payload={"change_set":change_set})
             outcome=controller.complete(args.run_id,exhausted=True)
             print(json.dumps({"outcome":outcome,"progress":decision,"change_set":change_set,"measurement":measurement,"objective_records":store.objective_records(args.run_id)},indent=2))
         finally: store.close()
