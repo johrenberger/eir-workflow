@@ -1,5 +1,7 @@
 # EIR Domain 3 runtime
 
+Execution Intent Representation (EIR). It’s the runtime-neutral intermediate representation we defined between a human objective and the execution system:
+
 An offline-first, SQLite-backed implementation of the supplied EIR v1.0 Domain 3 research test. It does not contain or hard-code the 2025 FOMC answer.
 
 ```bash
